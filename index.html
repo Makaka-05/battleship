@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Морской бой</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>Морской бой</h1>
+    <p id="status">Расставь корабли</p>
+
+    <div id="online" class="online">
+        <div class="controls">
+            <button id="inviteBtn">Играть с другом</button>
+            <input id="codeInput" placeholder="Код комнаты" maxlength="5" autocomplete="off" autocapitalize="characters">
+            <button id="joinBtn">Войти по коду</button>
+        </div>
+        <div id="roomInfo" class="room-info" hidden>
+            <p>Код комнаты: <b id="roomCode"></b></p>
+            <p id="roomState"></p>
+            <div class="controls">
+                <button id="shareBtn">Поделиться ссылкой</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="boards">
+        <section>
+            <h2>Твоё поле</h2>
+            <div id="playerBoard" class="board"></div>
+
+            <div class="controls">
+                <button id="randomBtn">Случайно</button>
+                <button id="clearBtn">С чистого листа</button>
+                <button id="playBtn">Играть</button>
+                <button id="restartBtn" hidden>Играть снова</button>
+            </div>
+
+            <div id="dock" class="dock"></div>
+        </section>
+        <section>
+            <h2>Поле врага</h2>
+            <div id="enemyBoard" class="board"></div>
+        </section>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js";
+        import { getDatabase, ref, set, get, onValue, update, remove } from "https://www.gstatic.com/firebasejs/13.0.0/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDMfQV_kbqTV8U-oXwZBHWxun8N0tVcj4o",
+            authDomain: "battleship-online-5280.firebaseapp.com",
+            databaseURL: "https://battleship-online-5280-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "battleship-online-5280",
+            storageBucket: "battleship-online-5280.firebasestorage.app",
+            messagingSenderId: "806094838943",
+            appId: "1:806094838943:web:6b2f4435efe04cdfdb16aa"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const database = getDatabase(app);
+
+        window.fb = { database, ref, set, get, onValue, update, remove };
+
+        onValue(ref(database, '.info/connected'), function(snapshot) {
+            console.log('Firebase подключён:', snapshot.val());
+        });
+    </script>
+
+    <script>
+        let playerBoard = document.getElementById('playerBoard');
+        let enemyBoard = document.getElementById('enemyBoard');
+        let dock = document.getElementById('dock');
+        let statusElement = document.getElementById('status');
+        let randomBtn = document.getElementById('randomBtn');
+        let clearBtn = document.getElementById('clearBtn');
+        let playBtn = document.getElementById('playBtn');
+        let restartBtn = document.getElementById('restartBtn');
+
+        let gameStarted = false;
+        let enemyShips = [];
+        let enemyGrid = [];
+        let gameOver = false;
+        let playerGrid = [];
+        let playerTurn = true;
+        let botDelay = 1500;
+        let botTargets = [];
+
+        let shipSizes = [4, 3, 3, 2, 2, 2, 1, 1, 1, 1];
+        let playerShips = [];
+
+        function drawBoard(data, boardElement) {
+            boardElement.innerHTML = '';
+
+            for (let i = 0; i < data.length; i++) {
+                let cell = document.createElement('div');
+                cell.className = 'cell';
+
+                if (data[i] === 1) {
+                    cell.className = 'cell ship';
+                }
+
+                boardElement.appendChild(cell);
+            }
+        }
+
+        function shipCells(ship) {
+            let cells = [];
+
+            for (let k = 0; k < ship.size; k++) {
+                if (ship.horizontal) {
+                    cells.push({ r: ship.row, c: ship.col + k });
+                } else {
+                    cells.push({ r: ship.row + k, c: ship.col });
+                }
+            }
+
+            return cells;
+        }
+
+        function isInside(ship) {
+            let cells = shipCells(ship);
+
+            for (let i = 0; i < cells.length; i++) {
+                if (cells[i].r < 0 || cells[i].r > 9 || cells[i].c < 0 || cells[i].c > 9) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        function canPlace(ship, ships, ignoreIndex) {
+            if (!isInside(ship)) {
+                return false;
+            }
+
+            let cells = shipCells(ship);
+
+            for (let s = 0; s < ships.length; s++) {
+                if (s === ignoreIndex || ships[s].row === null) {
+                    continue;
+                }
+
+                let other = shipCells(ships[s]);
+
+                for (let a = 0; a < cells.length; a++) {
+                    for (let b = 0; b < other.length; b++) {
+                        let farRows = Math.abs(cells[a].r - other[b].r);
+                        let farCols = Math.abs(cells[a].c - other[b].c);
+
+                        if (farRows <= 1 && farCols <= 1) {
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        function randomLayout() {
+            let ships = [];
+
+            for (let s = 0; s < shipSizes.length; s++) {
+                let placed = false;
+                let tries = 0;
+
+                while (!placed && tries < 500) {
+                    let ship = {
+                        size: shipSizes[s],
+                        row: Math.floor(Math.random() * 10),
+                        col: Math.floor(Math.random() * 10),
+                        horizontal: Math.random() < 0.5
+                    };
+
+                    if (canPlace(ship, ships, -1)) {
+                        ships.push(ship);
+                        placed = true;
+                    }
+
+                    tries++;
+                }
+
+                if (!placed) {
+                    return randomLayout();
+                }
+            }
+
+            return ships;
+        }
+
+        function emptyLayout() {
+            let ships = [];
+
+            for (let s = 0; s < shipSizes.length; s++) {
+                ships.push({ size: shipSizes[s], row: null, col: null, horizontal: true });
+            }
+
+            return ships;
+        }
+
+        function setCellSize() {
+            let size = playerBoard.clientWidth / 10;
+            document.documentElement.style.setProperty('--cell', size + 'px');
+        }
+
+        function placeElement(el, ship) {
+            el.style.left = ship.col * 10 + '%';
+            el.style.top = ship.row * 10 + '%';
+            el.style.width = (ship.horizontal ? ship.size * 10 : 10) + '%';
+            el.style.height = (ship.horizontal ? 10 : ship.size * 10) + '%';
+        }
+
+        function updateStatus() {
+            if (gameStarted) {
+                return;
+            }
+
+            let left = 0;
+
+            for (let s = 0; s < playerShips.length; s++) {
+                if (playerShips[s].row === null) {
+                    left++;
+                }
+            }
+
+            if (left > 0) {
+                statusElement.textContent = 'Перетащи корабли на поле, осталось: ' + left;
+            } else {
+                statusElement.textContent = 'Корабли расставлены. Клик по кораблю поворачивает его';
+            }
+        }
+
+        function renderPlayerBoard() {
+            playerBoard.innerHTML = '';
+            dock.innerHTML = '';
+
+            for (let i = 0; i < 100; i++) {
+                let cell = document.createElement('div');
+                cell.className = 'cell';
+                playerBoard.appendChild(cell);
+            }
+
+            setCellSize();
+
+            for (let s = 0; s < playerShips.length; s++) {
+                let el = createShipElement(s);
+
+                if (playerShips[s].row === null) {
+                    dock.appendChild(el);
+                } else {
+                    playerBoard.appendChild(el);
+                }
+            }
+
+            updateStatus();
+        }
+
+        function createShipElement(index) {
+            let ship = playerShips[index];
+            let el = document.createElement('div');
+            el.className = 'ship-piece';
+
+            if (ship.row === null) {
+                let w = ship.horizontal ? ship.size : 1;
+                let h = ship.horizontal ? 1 : ship.size;
+
+                el.classList.add('in-dock');
+                el.style.width = 'calc(var(--cell) * ' + w + ')';
+                el.style.height = 'calc(var(--cell) * ' + h + ')';
+            } else {
+                placeElement(el, ship);
+            }
+
+            el.addEventListener('pointerdown', function(event) {
+                startDrag(event, index, el);
+            });
+
+            return el;
+        }
+
+        function rotateShip(index) {
+            let ship = playerShips[index];
+
+            if (ship.row === null) {
+                ship.horizontal = !ship.horizontal;
+                return;
+            }
+
+            let rotated = {
+                size: ship.size,
+                row: ship.row,
+                col: ship.col,
+                horizontal: !ship.horizontal
+            };
+
+            rotated.row = Math.min(rotated.row, 10 - (rotated.horizontal ? 1 : rotated.size));
+            rotated.col = Math.min(rotated.col, 10 - (rotated.horizontal ? rotated.size : 1));
+
+            if (canPlace(rotated, playerShips, index)) {
+                ship.row = rotated.row;
+                ship.col = rotated.col;
+                ship.horizontal = rotated.horizontal;
+            }
+        }
+
+        function startDrag(event, index, el) {
+            if (gameStarted) {
+                return;
+            }
+
+            event.preventDefault();
+
+            let ship = playerShips[index];
+            let boardRect = playerBoard.getBoundingClientRect();
+            let boardLeft = boardRect.left + playerBoard.clientLeft;
+            let boardTop = boardRect.top + playerBoard.clientTop;
+            let cellSize = playerBoard.clientWidth / 10;
+
+            let elRect = el.getBoundingClientRect();
+            let grabCol = Math.floor((event.clientX - elRect.left) / cellSize);
+            let grabRow = Math.floor((event.clientY - elRect.top) / cellSize);
+
+            let startX = event.clientX;
+            let startY = event.clientY;
+            let moved = false;
+            let test = { size: ship.size, row: 0, col: 0, horizontal: ship.horizontal };
+
+            let ghost = document.createElement('div');
+            ghost.className = 'ghost';
+            ghost.style.display = 'none';
+            playerBoard.appendChild(ghost);
+
+            el.setPointerCapture(event.pointerId);
+            el.classList.add('dragging');
+
+            function onMove(e) {
+                let dx = e.clientX - startX;
+                let dy = e.clientY - startY;
+
+                if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                    moved = true;
+                }
+
+                if (!moved) {
+                    return;
+                }
+
+                el.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
+
+                test.col = Math.floor((e.clientX - boardLeft) / cellSize) - grabCol;
+                test.row = Math.floor((e.clientY - boardTop) / cellSize) - grabRow;
+
+                if (isInside(test)) {
+                    placeElement(ghost, test);
+                    ghost.style.display = 'block';
+                    ghost.className = canPlace(test, playerShips, index) ? 'ghost' : 'ghost bad';
+                } else {
+                    ghost.style.display = 'none';
+                }
+            }
+
+            function onUp(e) {
+                el.removeEventListener('pointermove', onMove);
+                el.removeEventListener('pointerup', onUp);
+                el.removeEventListener('pointercancel', onUp);
+                ghost.remove();
+
+                if (!moved) {
+                    rotateShip(index);
+                } else if (canPlace(test, playerShips, index)) {
+                    ship.row = test.row;
+                    ship.col = test.col;
+                } else {
+                    let outside = e.clientX < boardRect.left - 20 || e.clientX > boardRect.right + 20 ||
+                                  e.clientY < boardRect.top - 20 || e.clientY > boardRect.bottom + 20;
+
+                    if (outside) {
+                        ship.row = null;
+                        ship.col = null;
+                    }
+                }
+
+                renderPlayerBoard();
+            }
+
+            el.addEventListener('pointermove', onMove);
+            el.addEventListener('pointerup', onUp);
+            el.addEventListener('pointercancel', onUp);
+        }
+
+        function allPlaced() {
+            for (let s = 0; s < playerShips.length; s++) {
+                if (playerShips[s].row === null) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        function makeGrid(ships) {
+            let grid = [];
+            for (let i = 0; i < 100; i++) {
+                grid.push(0);
+            }
+
+            for (let s = 0; s < ships.length; s++) {
+                let cells = shipCells(ships[s]);
+
+                for (let k = 0; k < cells.length; k++) {
+                    grid[cells[k].r * 10 + cells[k].c] = 1;
+                }
+            }
+
+            return grid;
+        }
+
+        playBtn.addEventListener('click', function() {
+            if (!allPlaced()) {
+                statusElement.textContent = 'Сначала расставь все корабли';
+                return;
+            }
+
+            gameStarted = true;
+            document.body.classList.add('playing');
+            window.scrollTo(0, 0);
+            enemyShips = randomLayout();
+            enemyGrid = makeGrid(enemyShips);
+
+            randomBtn.disabled = true;
+            clearBtn.disabled = true;
+            playBtn.disabled = true;
+
+            playerGrid = makeGrid(playerShips);
+            drawPlayerBoard();
+            drawEnemyBoard();
+
+            statusElement.textContent = 'Игра началась. Твой ход';
+        });
+
+        function drawPlayerBoard() {
+            playerBoard.innerHTML = '';
+
+            for (let i = 0; i < 100; i++) {
+                let cell = document.createElement('div');
+                cell.className = 'cell';
+
+                if (playerGrid[i] === 1) {
+                    cell.className = 'cell ship';
+                }
+
+                if (playerGrid[i] === 2) {
+                    cell.className = 'cell miss';
+                }
+
+                if (playerGrid[i] === 3) {
+                    cell.className = 'cell hit';
+                }
+
+                playerBoard.appendChild(cell);
+            }
+        }
+
+        function drawEnemyBoard() {
+            enemyBoard.innerHTML = '';
+            for (let i = 0; i < 100; i++) {
+                let cell = document.createElement('div');
+                cell.className = 'cell';
+
+                if (enemyGrid[i] === 2) {
+                    cell.className = 'cell miss';
+                }
+
+                if (enemyGrid[i] === 3) {
+                    cell.className = 'cell hit';
+                }
+
+                cell.addEventListener('click', function() {
+                    shootEnemy(i);
+                });
+
+                enemyBoard.appendChild(cell);
+            }
+        }
+
+        function isSunk(ship, grid) {
+            let cells = shipCells(ship);
+
+            for (let k = 0; k < cells.length; k++) {
+                if (grid[cells[k].r * 10 + cells[k].c] !== 3) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        function markAround(ship, grid) {
+            let cells = shipCells(ship);
+
+            for (let k = 0; k < cells.length; k++) {
+                for (let dr = -1; dr <= 1; dr++) {
+                    for (let dc = -1; dc <= 1; dc++) {
+                        let r = cells[k].r + dr;
+                        let c = cells[k].c + dc;
+
+                        if (r < 0 || r > 9 || c < 0 || c > 9) {
+                            continue;
+                        }
+
+                        if (grid[r * 10 + c] === 0) {
+                            grid[r * 10 + c] = 2;
+                        }
+                    }
+                }
+            }
+        }
+
+        function checkSunk(ships, grid) {
+            for (let s = 0; s < ships.length; s++) {
+                if (isSunk(ships[s], grid) && !ships[s].sunk) {
+                    ships[s].sunk = true;
+                    markAround(ships[s], grid);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        function allSunk(ships) {
+            for (let s = 0; s < ships.length; s++) {
+                if (!ships[s].sunk) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        function addTargets(index) {
+            let r = Math.floor(index / 10);
+            let c = index % 10;
+
+            let around = [
+                { r: r - 1, c: c },
+                { r: r + 1, c: c },
+                { r: r, c: c - 1 },
+                { r: r, c: c + 1 }
+            ];
+
+            for (let k = 0; k < around.length; k++) {
+                let nr = around[k].r;
+                let nc = around[k].c;
+
+                if (nr < 0 || nr > 9 || nc < 0 || nc > 9) {
+                    continue;
+                }
+
+                let cellIndex = nr * 10 + nc;
+
+                if (playerGrid[cellIndex] === 0 || playerGrid[cellIndex] === 1) {
+                    botTargets.push(cellIndex);
+                }
+            }
+        }
+
+        function pickShot() {
+            while (botTargets.length > 0) {
+                let target = botTargets.pop();
+
+                if (playerGrid[target] === 0 || playerGrid[target] === 1) {
+                    return target;
+                }
+            }
+
+            let index = Math.floor(Math.random() * 100);
+
+            while (playerGrid[index] === 2 || playerGrid[index] === 3) {
+                index = Math.floor(Math.random() * 100);
+            }
+
+            return index;
+        }
+
+        function computerTurn() {
+            if (gameOver) {
+                return;
+            }
+
+            let index = pickShot();
+
+            if (playerGrid[index] === 1) {
+                playerGrid[index] = 3;
+
+                if (checkSunk(playerShips, playerGrid)) {
+                    botTargets = [];
+                    statusElement.textContent = 'Враг потопил твой корабль';
+                } else {
+                    addTargets(index);
+                    statusElement.textContent = 'Враг попал';
+                }
+
+                if (allSunk(playerShips)) {
+                    gameOver = true;
+                    restartBtn.hidden = false;
+                    statusElement.textContent = 'Поражение. Все твои корабли потоплены';
+                } else {
+                    setTimeout(computerTurn, botDelay);
+                }
+            } else {
+                playerGrid[index] = 2;
+                statusElement.textContent = 'Враг промахнулся. Твой ход';
+                playerTurn = true;
+            }
+
+            drawPlayerBoard();
+        }
+
+        function shootEnemy(index) {
+            if (!gameStarted || gameOver || !playerTurn) {
+                return;
+            }
+
+            if (enemyGrid[index] === 2 || enemyGrid[index] === 3) {
+                return;
+            }
+
+            if (enemyGrid[index] === 1) {
+                enemyGrid[index] = 3;
+
+                if (checkSunk(enemyShips, enemyGrid)) {
+                    statusElement.textContent = 'Потопил!';
+                } else {
+                    statusElement.textContent = 'Попал!';
+                }
+
+                if (allSunk(enemyShips)) {
+                    gameOver = true;
+                    restartBtn.hidden = false;
+                    statusElement.textContent = 'Победа! Все корабли врага потоплены';
+                }
+            } else {
+                enemyGrid[index] = 2;
+                statusElement.textContent = 'Мимо. Ход врага';
+                playerTurn = false;
+                setTimeout(computerTurn, botDelay);
+            }
+
+            drawEnemyBoard();
+        }
+
+        restartBtn.addEventListener('click', function() {
+            location.reload();
+        });
+
+        randomBtn.addEventListener('click', function() {
+            playerShips = randomLayout();
+            renderPlayerBoard();
+        });
+
+        clearBtn.addEventListener('click', function() {
+            playerShips = emptyLayout();
+            renderPlayerBoard();
+        });
+
+        window.addEventListener('resize', function() {
+            if (!gameStarted) {
+                renderPlayerBoard();
+            }
+        });
+
+        let emptyGrid = [];
+        for (let i = 0; i < 100; i++) {
+            emptyGrid.push(0);
+        }
+
+        playerShips = randomLayout();
+        renderPlayerBoard();
+        drawBoard(emptyGrid, enemyBoard);
+    </script>
+
+    <script>
+        let roomCode = null;
+        let myRole = null;
+        let inviteBtn = document.getElementById('inviteBtn');
+        let joinBtn = document.getElementById('joinBtn');
+        let codeInput = document.getElementById('codeInput');
+        let roomInfo = document.getElementById('roomInfo');
+        let roomCodeElement = document.getElementById('roomCode');
+        let roomState = document.getElementById('roomState');
+        let shareBtn = document.getElementById('shareBtn');
+
+        function makeCode() {
+            let letters = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+            let code = '';
+
+            for (let i = 0; i < 5; i++) {
+                code += letters[Math.floor(Math.random() * letters.length)];
+            }
+
+            return code;
+        }
+
+        let SITE_URL = 'https://makaka-05.github.io/battleship/';
+
+        function roomLink() {
+            return SITE_URL + '?room=' + roomCode;
+        }
+
+        function showRoom(text) {
+            roomInfo.hidden = false;
+            roomCodeElement.textContent = roomCode;
+            roomState.textContent = text;
+            inviteBtn.disabled = true;
+            joinBtn.disabled = true;
+            codeInput.disabled = true;
+        }
+
+        async function createRoom() {
+            if (!window.fb) {
+                statusElement.textContent = 'Нет связи с сервером';
+                return;
+            }
+
+            try {
+                let code = makeCode();
+                let roomRef = fb.ref(fb.database, 'rooms/' + code);
+                let snapshot = await fb.get(roomRef);
+
+                if (snapshot.exists()) {
+                    createRoom();
+                    return;
+                }
+
+                await fb.set(roomRef, { created: Date.now(), players: { host: true } });
+
+                roomCode = code;
+                myRole = 'host';
+                showRoom('Жду друга...');
+
+                fb.onValue(fb.ref(fb.database, 'rooms/' + code + '/players/guest'), function(snap) {
+                    if (snap.val() === true) {
+                        roomState.textContent = 'Друг подключился!';
+                    }
+                });
+            } catch (error) {
+                console.log(error);
+                statusElement.textContent = 'Не удалось создать комнату';
+            }
+        }
+
+        async function joinRoom(code) {
+            if (!window.fb) {
+                statusElement.textContent = 'Нет связи с сервером';
+                return;
+            }
+
+            code = code.trim().toUpperCase();
+
+            if (code.length !== 5) {
+                statusElement.textContent = 'Код — 5 символов';
+                return;
+            }
+
+            try {
+                let snapshot = await fb.get(fb.ref(fb.database, 'rooms/' + code));
+
+                if (!snapshot.exists()) {
+                    statusElement.textContent = 'Комната ' + code + ' не найдена';
+                    return;
+                }
+
+                let players = snapshot.val().players || {};
+
+                if (players.guest) {
+                    statusElement.textContent = 'В комнате уже есть второй игрок';
+                    return;
+                }
+
+                await fb.set(fb.ref(fb.database, 'rooms/' + code + '/players/guest'), true);
+
+                roomCode = code;
+                myRole = 'guest';
+                showRoom('Ты в комнате. Хозяин на связи');
+            } catch (error) {
+                console.log(error);
+                statusElement.textContent = 'Не удалось войти в комнату';
+            }
+        }
+
+        inviteBtn.addEventListener('click', createRoom);
+
+        joinBtn.addEventListener('click', function() {
+            joinRoom(codeInput.value);
+        });
+
+        shareBtn.addEventListener('click', async function() {
+            let text = 'Играем в Морской бой! Код комнаты: ' + roomCode;
+
+            try {
+                if (navigator.share) {
+                    await navigator.share({ title: 'Морской бой', text: text, url: roomLink() });
+                } else {
+                    await navigator.clipboard.writeText(text + '\n' + roomLink());
+                    shareBtn.textContent = 'Скопировано!';
+                }
+            } catch (error) {
+                console.log(error);
+            }
+        });
+
+        window.addEventListener('load', function() {
+            let params = new URLSearchParams(location.search);
+            let code = params.get('room');
+
+            if (code) {
+                joinRoom(code);
+            }
+        });
+    </script>
+</body>
+</html>
