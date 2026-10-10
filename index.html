@@ -80,6 +80,8 @@
         let restartBtn = document.getElementById('restartBtn');
 
         let gameStarted = false;
+        let iAmReady = false;
+        let opponentReady = false;
         let enemyShips = [];
         let enemyGrid = [];
         let gameOver = false;
@@ -215,7 +217,7 @@
         }
 
         function updateStatus() {
-            if (gameStarted) {
+            if (gameStarted || iAmReady) {
                 return;
             }
 
@@ -231,6 +233,10 @@
                 statusElement.textContent = 'Перетащи корабли на поле, осталось: ' + left;
             } else {
                 statusElement.textContent = 'Корабли расставлены. Клик по кораблю поворачивает его';
+            }
+
+            if (opponentReady) {
+                statusElement.textContent += ' | Соперник уже готов!';
             }
         }
 
@@ -308,7 +314,7 @@
         }
 
         function startDrag(event, index, el) {
-            if (gameStarted) {
+            if (gameStarted || iAmReady) {
                 return;
             }
 
@@ -422,6 +428,11 @@
         playBtn.addEventListener('click', function() {
             if (!allPlaced()) {
                 statusElement.textContent = 'Сначала расставь все корабли';
+                return;
+            }
+
+            if (roomCode !== null) {
+                readyOnline();
                 return;
             }
 
@@ -712,6 +723,35 @@
             return SITE_URL + '?room=' + roomCode;
         }
 
+        function refreshOnlineStatus() {
+            if (iAmReady && opponentReady) {
+                statusElement.textContent = 'Оба готовы! Сейчас начнём';
+            } else if (iAmReady) {
+                statusElement.textContent = 'Ты готов. Ждём соперника...';
+            } else if (opponentReady) {
+                statusElement.textContent = 'Соперник уже готов. Расставь корабли и нажми «Играть»';
+            }
+        }
+
+        function watchReady() {
+            let opponent = myRole === 'host' ? 'guest' : 'host';
+
+            fb.onValue(fb.ref(fb.database, 'rooms/' + roomCode + '/ready/' + opponent), function(snap) {
+                opponentReady = snap.val() === true;
+                refreshOnlineStatus();
+            });
+        }
+
+        async function readyOnline() {
+            iAmReady = true;
+            randomBtn.disabled = true;
+            clearBtn.disabled = true;
+            playBtn.disabled = true;
+
+            await fb.set(fb.ref(fb.database, 'rooms/' + roomCode + '/ready/' + myRole), true);
+            refreshOnlineStatus();
+        }
+
         function showRoom(text) {
             roomInfo.hidden = false;
             roomCodeElement.textContent = roomCode;
@@ -742,6 +782,7 @@
                 roomCode = code;
                 myRole = 'host';
                 showRoom('Жду друга...');
+                watchReady();
 
                 fb.onValue(fb.ref(fb.database, 'rooms/' + code + '/players/guest'), function(snap) {
                     if (snap.val() === true) {
@@ -787,6 +828,7 @@
                 roomCode = code;
                 myRole = 'guest';
                 showRoom('Ты в комнате. Хозяин на связи');
+                watchReady();
             } catch (error) {
                 console.log(error);
                 statusElement.textContent = 'Не удалось войти в комнату';
