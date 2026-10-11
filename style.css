@@ -345,3 +345,22 @@ body.playing .online {
 .ship-art.revealed {
     opacity: 0.5;
 }
+
+.app-link {
+    margin: 28px 0 0;
+    font-size: 12px;
+    text-align: center;
+}
+
+.app-link[hidden] {
+    display: none;
+}
+
+.app-link a {
+    color: var(--navy);
+    opacity: 0.7;
+}
+
+body.playing .app-link {
+    display: none;
+}

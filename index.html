@@ -45,6 +45,8 @@
         </section>
     </div>
 
+    <p id="appLink" class="app-link" hidden><a href="battleship.apk" download>Скачать приложение для Android (4 МБ)</a></p>
+
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js";
         import { getDatabase, ref, set, get, onValue, update, remove, onDisconnect } from "https://www.gstatic.com/firebasejs/13.0.0/firebase-database.js";
@@ -1101,6 +1103,13 @@
         });
 
         window.addEventListener('load', function() {
+            let isAndroid = /Android/i.test(navigator.userAgent);
+            let insideApp = window.Capacitor || location.hostname === 'localhost';
+
+            if (isAndroid && !insideApp) {
+                document.getElementById('appLink').hidden = false;
+            }
+
             let params = new URLSearchParams(location.search);
             let code = params.get('room');
 
