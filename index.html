@@ -531,7 +531,14 @@
             statusElement.textContent = 'Игра началась. Твой ход';
         });
 
+        function updateTurnLook() {
+            let waiting = gameStarted && !gameOver && !playerTurn;
+            document.body.classList.toggle('their-turn', waiting);
+            document.body.classList.toggle('my-turn', gameStarted && !gameOver && playerTurn);
+        }
+
         function drawPlayerBoard() {
+            updateTurnLook();
             playerBoard.innerHTML = '';
 
             for (let s = 0; s < playerShips.length; s++) {
@@ -557,6 +564,7 @@
         }
 
         function drawEnemyBoard() {
+            updateTurnLook();
             enemyBoard.innerHTML = '';
 
             for (let s = 0; s < enemyShips.length; s++) {

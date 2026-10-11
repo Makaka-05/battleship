@@ -376,3 +376,17 @@ body.playing .online {
 body.playing .app-link {
     display: none;
 }
+
+#enemyBoard,
+#playerBoard {
+    transition: filter 0.3s ease, box-shadow 0.3s ease;
+}
+
+body.my-turn #enemyBoard {
+    box-shadow: 0 0 0 4px var(--red);
+}
+
+body.their-turn #enemyBoard {
+    filter: brightness(0.5) saturate(0.6);
+    pointer-events: none;
+}
