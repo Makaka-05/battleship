@@ -347,9 +347,7 @@ body.playing .online {
 }
 
 .app-link {
-    margin: 28px 0 0;
-    font-size: 12px;
-    text-align: center;
+    margin: 22px 0 0;
 }
 
 .app-link[hidden] {
@@ -357,8 +355,22 @@ body.playing .online {
 }
 
 .app-link a {
+    display: inline-block;
+    padding: 8px 14px;
+    background: var(--paper-light);
+    border: 2px solid var(--navy);
+    box-shadow: 3px 3px 0 var(--navy);
     color: var(--navy);
-    opacity: 0.7;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-decoration: none;
+    text-transform: uppercase;
+}
+
+.app-link a:active {
+    transform: translate(3px, 3px);
+    box-shadow: 0 0 0 var(--navy);
 }
 
 body.playing .app-link {
